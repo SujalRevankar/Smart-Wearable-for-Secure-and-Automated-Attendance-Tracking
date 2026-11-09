@@ -1,0 +1,100 @@
+SMART WEARABLE — NONCOMMERCIAL DEMONSTRATION LICENSE
+Version 1.0 — 9 November 2026
+
+Project: Smart Wearable for Secure and Automated Attendance Tracking
+Copyright (c) 2026 viraj54
+
+This is a custom, source-available license for noncommercial demonstration
+and learning. It is not an open-source license. All rights not expressly
+granted below are reserved.
+
+1. SCOPE
+
+"Project Materials" means the original source code, notebooks,
+documentation and demonstration assets in this repository that viraj54
+owns and makes available under this license. This license grants rights
+only to the extent viraj54 is entitled to grant them.
+
+Third-party libraries, code, fonts, map data, media and other materials
+remain subject to their own licenses and notices. This license does not
+replace, restrict or relicense those third-party rights. Separately
+identified materials are governed by their stated terms.
+
+2. PERMITTED NONCOMMERCIAL USE
+
+Subject to the conditions below, you may, without paying a license fee:
+
+(a) view, download and make copies of the Project Materials for personal
+    learning, noncommercial evaluation and free educational demonstrations;
+(b) run the software locally and on your own prototype hardware for those
+    purposes;
+(c) modify your copy solely to support those permitted purposes; and
+(d) show free demonstrations, screenshots or recordings of your permitted
+    use, provided you credit the original project and identify your changes.
+
+These permissions do not authorize production attendance operations,
+commercial deployment or use as a service for other people. A separate
+written license is required for such use.
+
+3. NO SALE OR COMMERCIAL EXPLOITATION
+
+Without prior written permission from viraj54, you may not:
+
+(a) sell, rent, lease, sublicense or otherwise charge for access to the
+    Project Materials, modified versions, demonstrations or hosted instances;
+(b) include them in a product, device, course, application, subscription or
+    service offered for payment or other commercial compensation;
+(c) use them for paid client work, commercial business operations or a
+    commercial product demonstration; or
+(d) monetize demonstrations or recordings through paid access, advertising
+    or sponsorship tied to the project demonstration.
+
+"Noncommercial" means the use is not primarily intended for or directed
+at commercial advantage or monetary compensation. Making a modification
+or supplying access free of charge does not by itself make an otherwise
+commercial activity noncommercial.
+
+4. COPYING, SHARING AND ATTRIBUTION
+
+Keep this complete license and the existing copyright and third-party
+notices with every permitted copy. Clearly identify modified versions and
+do not imply that the original author endorses them.
+
+You may create and share a GitHub fork for the permitted noncommercial
+purposes, provided it retains this license and the required notices.
+Except for such forks and the demonstration media permitted in Section 2,
+redistribution of source, binaries or modified Project Materials requires
+prior written permission. Do not relicense the Project Materials or remove
+the restrictions in this license.
+
+Nothing in this license limits rights users receive independently under
+applicable law or GitHub's applicable platform terms, including viewing
+and forking a public repository as those terms permit.
+
+5. NO RIGHTS TO PRIVATE SYSTEMS OR PERSONAL DATA
+
+No permission is granted to use the author's credentials, database,
+accounts, private ECG recordings, enrollment templates or personal data.
+Use your own authorized configuration and appropriately consented or
+synthetic data. The demonstration assets do not establish authentication
+accuracy or suitability for operational attendance decisions.
+
+6. WARRANTY DISCLAIMER AND LIABILITY
+
+THE PROJECT MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR
+A PARTICULAR PURPOSE, NON-INFRINGEMENT, ACCURACY, SECURITY OR RELIABILITY.
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE COPYRIGHT HOLDER
+IS NOT LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM
+THE PROJECT MATERIALS OR THEIR USE, WHETHER IN CONTRACT, TORT OR OTHERWISE.
+
+7. TERMINATION AND OTHER PERMISSIONS
+
+If you breach these terms, the permissions granted by this license end.
+You must cease use and distribution that depended on those permissions.
+Any rights you hold independently under applicable law or third-party
+licenses are unaffected. No trademark rights or endorsement are granted.
+
+For commercial use, production use, broader redistribution or any use
+outside these permissions, obtain a separate written agreement from
+viraj54 through the GitHub profile: https://github.com/viraj54
