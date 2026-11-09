@@ -130,6 +130,11 @@ A low score means the window resembles the enrollment profile. It is not a proba
 | UART GPS module | Latitude and longitude measurements |
 | Computer or phone | Browser access to the ESP32 dashboard |
 
+### Connection Diagram
+
+![Two-ESP32 breadboard connections](./two-esp32-breadboard-wiring.png?raw=true)
+
+
 ### Signal connections in the combined sketch
 
 | Module signal | Main ESP32 pin |
