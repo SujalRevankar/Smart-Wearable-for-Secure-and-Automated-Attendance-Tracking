@@ -190,14 +190,14 @@ These sketches are alternative programs. **Open and upload one sketch at a time*
    python -m pip install pandas numpy jupyter
    ```
 
-4. 4. Open `training/IOT_ML_VIRAJ.ipynb`. Set the `ECG_CSV_PATH` environment variable to your private CSV, or place it at `training/data/enrollment.csv` when running from the training folder.
+4. Open `training/IOT_ML_VIRAJ.ipynb`. Set the `ECG_CSV_PATH` environment variable to your private CSV, or place it at `training/data/enrollment.csv` when running from the training folder.
 5. Run the notebook and inspect the number of retained rows and the distance statistics.
 6. Transfer the six means, six standard deviations, and chosen threshold into your private firmware configuration. Validate with separate authorized and unauthorized recordings before relying on the decision.
 
 ### Firmware setup
 
 1. Open the combined sketch in its own Arduino sketch folder.
-2. 2. Copy `config.example.h` to `config.local.h` inside your chosen sketch folder. Fill in your private settings and ECG enrollment values, then set `PROJECT_CONFIGURED` to `1`. Keep `config.local.h` private. See [configuration instructions](docs/CONFIGURATION.md).
+2. Copy `config.example.h` to `config.local.h` inside your chosen sketch folder. Fill in your private settings and ECG enrollment values, then set `PROJECT_CONFIGURED` to `1`. Keep `config.local.h` private. See [configuration instructions](docs/CONFIGURATION.md).
 3. Keep `RADIUS` at `50.0` for the documented circular geofence.
 4. Complete Firebase authentication, restricted database rules, and TLS certificate validation before live use. The uploaded prototype requires changes for these protections; see the limitations below.
 5. Connect the modules using the signal table, select the correct ESP32 board and port, then compile and upload.
