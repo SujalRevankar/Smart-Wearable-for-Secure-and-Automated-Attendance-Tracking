@@ -18,9 +18,11 @@ An ESP32-based prototype that combines an enrolled ECG profile with a 50-metre G
 
 </div>
 
-<!-- Add a reviewed project photo or demo GIF here after its asset is committed.
-Do not publish personal coordinates, private ECG records, or credentials in media.
--->
+## Project Demonstration
+
+<img src="./attendance-people-demo.gif?raw=true" alt="ECG and GPS attendance demonstration" width="100%">
+
+*Simulated demonstration with fictional people, showing ECG verification, the 50-metre geofence, and disconnected electrodes.*
 
 <details>
 <summary>Table of Contents</summary>
