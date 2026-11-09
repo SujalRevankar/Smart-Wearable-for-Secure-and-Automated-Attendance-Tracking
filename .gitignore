@@ -218,3 +218,30 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local credentials, locations and ECG enrollment templates
+**/config.local.h
+.env
+.env.*
+!.env.example
+*serviceAccount*.json
+*service-account*.json
+*credentials*.json
+*.pem
+*.key
+# Private exports, recordings, fitted profiles and model binaries
+**/data/**
+**/private/**
+**/exports/**
+*.csv
+*.pkl
+*.joblib
+*.h5
+*.tflite
+# Notebook checkpoints and local environments
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+.venv/
+venv/
+__pycache__/
+*.pyc
