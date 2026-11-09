@@ -232,22 +232,15 @@ The combined sketch writes attendance records; it does not implement a raw ECG e
 - **GPS uncertainty:** location error can affect decisions near the 50 m boundary.
 - **Connectivity and clock:** persistent offline queuing and retry handling are not implemented; time-dependent records rely on successful NTP synchronization.
 
-## Roadmap
-
-- [ ] Publish sanitized firmware and a private-configuration example.
-- [ ] Add the enrollment collection sketch and reproducible export instructions.
-- [ ] Correct duration accounting and validate reconnect/startup behavior.
-- [ ] Add authenticated Firebase access and certificate validation.
-- [ ] Evaluate authorized and unauthorized recordings on a held-out dataset.
-- [ ] Add a reviewed hardware photo and recorded working demo.
-
 ## Contributing
 
 Suggestions and reproducible bug reports are welcome. Do not include credentials, private database exports, personal locations, or participant ECG data in issues or pull requests.
 
 ## License
 
-A project license has not yet been selected.
+Available for noncommercial learning, evaluation, and free demonstrations only. Selling, paid services, and commercial deployment are prohibited without written permission.
+
+See [LICENSE.txt](LICENSE.txt) for the full terms.
 
 ## Contact and Acknowledgments
 
