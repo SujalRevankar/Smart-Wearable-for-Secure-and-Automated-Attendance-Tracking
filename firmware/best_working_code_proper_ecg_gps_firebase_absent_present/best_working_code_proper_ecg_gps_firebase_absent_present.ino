@@ -1,4 +1,5 @@
 // Public source: configure locally using config.example.h; see docs/CONFIGURATION.md.
+#include <Arduino.h>
 #include "config.local.h"
 
 #include <WiFi.h>
@@ -9,10 +10,11 @@
 #include <WiFiClientSecure.h>
 #include <math.h>
 #include <time.h>
+#include <sys/time.h>
 
 // ================== WIFI ==================
 
-// ================== FIREBASE (NO AUTH) ==================
+// ================== FIREBASE CONFIGURATION ==================
 // RTDB URL: https://YOUR_FIREBASE_PROJECT-default-rtdb.firebaseio.com
 // We will use REST calls like: https://<host>/<path>.json
 
@@ -34,6 +36,7 @@ volatile double lastLat = 0.0, lastLng = 0.0;
 volatile bool gpsValid = false;
 String gpsStatus = "NO_FIX";  // "INSIDE" / "OUTSIDE" / "NO_FIX"
 volatile unsigned long lastFixMs = 0;
+bool haveGpsFix = false;
 const unsigned long GPS_HOLD_MS = 5000;
 
 // ================== ECG PINS (AD8232 -> ESP32) ==================
@@ -79,6 +82,7 @@ unsigned long windowStart = 0;
 unsigned long lastPeakTime = 0;
 
 int beatCount = 0;
+unsigned int rrCount = 0;
 float rrSum = 0, rrSqSum = 0;
 float peakSum = 0, peakSqSum = 0;
 float energySum = 0;
@@ -100,14 +104,32 @@ unsigned long todayAbsentSec  = 0;
 
 // last day string
 String currentDay = "";
+String stateStartIso = "";
+String stateReason = "UNKNOWN";
+bool attendanceStarted = false;
+unsigned long lastAccountMs = 0;
+uint64_t presentRemainderMs = 0;
+uint64_t absentRemainderMs = 0;
 
-// Firebase push throttling (legacy keep, not used for per-interval writes)
+void accountElapsedUntil(unsigned long nowMs) {
+  if (!attendanceStarted) return;
+  unsigned long delta = nowMs - lastAccountMs;
+  uint64_t total = (currentAttend == AS_PRESENT ? presentRemainderMs : absentRemainderMs) + (uint64_t)delta;
+  if (currentAttend == AS_PRESENT) {
+    todayPresentSec += (unsigned long)(total / 1000ULL);
+    presentRemainderMs = total % 1000ULL;
+  } else {
+    todayAbsentSec += (unsigned long)(total / 1000ULL);
+    absentRemainderMs = total % 1000ULL;
+  }
+  lastAccountMs = nowMs;
+}
+
+
+// Periodic database writes, separate from elapsed-time accounting.
 unsigned long lastFirebaseHeartbeatMs = 0;
-const unsigned long FIREBASE_HEARTBEAT_MS = 15000; // kept for compatibility
+const unsigned long FIREBASE_HEARTBEAT_MS = 15000;
 
-// NEW: Attendance check/write interval (15 seconds). Change here to 10000 for 10s if needed.
-const unsigned long ATTEND_INTERVAL_MS = 15000UL;
-unsigned long lastAttendIntervalMs = 0;
 
 // ================== HELPERS ==================
 double distanceMeters(double lat1, double lon1, double lat2, double lon2) {
@@ -136,6 +158,10 @@ static inline float z2(float x, float mu, float sd) {
 }
 void resetWindow() {
   beatCount = 0;
+  rrCount = 0;
+  lastPeakTime = 0;
+  prev1 = prev2 = 0;
+  armed = true;
   rrSum = rrSqSum = 0;
   peakSum = peakSqSum = 0;
   energySum = 0;
@@ -147,7 +173,7 @@ void resetWindow() {
 String isoNow() {
   // returns "YYYY-MM-DDTHH:MM:SS"
   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) return "1970-01-01T00:00:00";
+  if (!getLocalTime(&timeinfo, 0)) return "";
   char buf[25];
   strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &timeinfo);
   return String(buf);
@@ -155,20 +181,32 @@ String isoNow() {
 String dayNow() {
   // returns "YYYY-MM-DD"
   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) return "1970-01-01";
+  if (!getLocalTime(&timeinfo, 0)) return "";
   char buf[12];
   strftime(buf, sizeof(buf), "%Y-%m-%d", &timeinfo);
   return String(buf);
 }
 
-// ================== FIREBASE REST (NO AUTH) ==================
+// ================== FIREBASE REST (ID TOKEN + VERIFIED TLS) ==================
 WiFiClientSecure fbClient;
+
+bool beginFirebaseRequest(HTTPClient& https, const String& path) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  if (!String(FIREBASE_ID_TOKEN).startsWith("eyJ") ||
+      String(FIREBASE_ROOT_CA).indexOf("-----BEGIN CERTIFICATE-----") < 0) {
+    Serial.println("Firebase request refused: configure a current ID token and trusted CA certificate.");
+    return false;
+  }
+  fbClient.setCACert(FIREBASE_ROOT_CA);
+  https.setTimeout(2000);
+  String url = String("https://") + FIREBASE_HOST + path + ".json?auth=" + FIREBASE_ID_TOKEN;
+  return https.begin(fbClient, url);
+}
+
 
 bool firebasePOST(const String& path, const String& jsonBody) {
   HTTPClient https;
-  String url = String("https://") + FIREBASE_HOST + path + ".json";
-  fbClient.setInsecure(); // for simplicity
-  if (!https.begin(fbClient, url)) return false;
+  if (!beginFirebaseRequest(https, path)) return false;
 
   https.addHeader("Content-Type", "application/json");
   int code = https.POST(jsonBody);
@@ -178,9 +216,7 @@ bool firebasePOST(const String& path, const String& jsonBody) {
 
 bool firebasePATCH(const String& path, const String& jsonBody) {
   HTTPClient https;
-  String url = String("https://") + FIREBASE_HOST + path + ".json";
-  fbClient.setInsecure();
-  if (!https.begin(fbClient, url)) return false;
+  if (!beginFirebaseRequest(https, path)) return false;
 
   https.addHeader("Content-Type", "application/json");
   int code = https.sendRequest("PATCH", (uint8_t*)jsonBody.c_str(), jsonBody.length());
@@ -190,9 +226,7 @@ bool firebasePATCH(const String& path, const String& jsonBody) {
 
 bool firebasePUT(const String& path, const String& jsonBody) {
   HTTPClient https;
-  String url = String("https://") + FIREBASE_HOST + path + ".json";
-  fbClient.setInsecure();
-  if (!https.begin(fbClient, url)) return false;
+  if (!beginFirebaseRequest(https, path)) return false;
 
   https.addHeader("Content-Type", "application/json");
   int code = https.PUT(jsonBody);
@@ -200,19 +234,17 @@ bool firebasePUT(const String& path, const String& jsonBody) {
   return (code >= 200 && code < 300);
 }
 
-// Added from Code 2: Firebase GET
+// Read stored summary values through the authenticated REST helper.
 bool firebaseGET(const String& path, String &out) {
   HTTPClient https;
-  String url = String("https://") + FIREBASE_HOST + path + ".json";
-  fbClient.setInsecure();
-  if (!https.begin(fbClient, url)) return false;
+  if (!beginFirebaseRequest(https, path)) return false;
   int code = https.GET();
   if (code > 0) out = https.getString();
   https.end();
   return (code >= 200 && code < 300);
 }
 
-// tiny JSON number extractor (from Code 2)
+// Parse the numeric fields used by the summary response.
 long extractJsonNumber(const String& json, const String& key) {
   String k = "\"" + key + "\"";
   int i = json.indexOf(k);
@@ -236,7 +268,7 @@ long extractJsonNumber(const String& json, const String& key) {
   return neg ? -val : val;
 }
 
-// Load today's totals from Firebase summary (from Code 2)
+// Restore this device's stored totals for the current day.
 void loadTodayTotalsFromFirebase() {
   String path = String("/attendance/") + STUDENT_NAME + "/" + currentDay + "/summary";
   String resp;
@@ -263,42 +295,57 @@ void loadTodayTotalsFromFirebase() {
 // ================== ATTENDANCE LOGIC ==================
 bool isPresentNow() {
   // PRESENT only if GPS is INSIDE + ECG authorized
-  bool gpsOk = gpsValid && (gpsStatus == "INSIDE");
-  bool ecgOk = (lastStatus == ST_AUTHORIZED);
+  bool gpsOk = haveGpsFix && gpsValid && (millis() - lastFixMs < GPS_HOLD_MS) && (gpsStatus == "INSIDE");
+  bool ecgOk = (lastStatus == ST_AUTHORIZED) && electrodesConnected() && lastWindowMs != 0 && (millis() - lastWindowMs <= WINDOW_MS + 2000UL);
   return gpsOk && ecgOk;
 }
 
 void startNewDayIfNeeded() {
   String d = dayNow();
-  if (currentDay == "") {
+  if (d.length() == 0) return; // Do not write records with a fabricated 1970 date.
+  unsigned long nowMs = millis();
+  if (!attendanceStarted) {
     currentDay = d;
-    stateStartMs = millis();
-    currentAttend = AS_ABSENT;
-    todayPresentSec = 0;
-    todayAbsentSec = 0;
+    loadTodayTotalsFromFirebase();
+    nowMs = millis();
+    stateStartIso = isoNow();
+    if (stateStartIso.length() == 0) return;
+    attendanceStarted = true;
+    currentAttend = isPresentNow() ? AS_PRESENT : AS_ABSENT;
+    stateReason = currentAttend == AS_PRESENT ? "OK" : absentReason();
+    stateStartMs = lastAccountMs = nowMs;
     return;
   }
-  if (d != currentDay) {
-    // close yesterday segment before switching day
-    unsigned long durSec = (millis() - stateStartMs) / 1000;
-    if (currentAttend == AS_PRESENT) todayPresentSec += durSec;
-    else todayAbsentSec += durSec;
+  if (d == currentDay) return;
 
-    // push end-of-day summary
-    String base = String("/attendance/") + STUDENT_NAME + "/" + currentDay;
-    String summary = "{";
-    summary += "\"present_sec\":" + String(todayPresentSec) + ",";
-    summary += "\"absent_sec\":"  + String(todayAbsentSec);
-    summary += "}";
-    firebasePATCH(base + "/summary", summary);
-
-    // reset for new day
-    currentDay = d;
-    stateStartMs = millis();
-    currentAttend = AS_ABSENT;
-    todayPresentSec = 0;
-    todayAbsentSec = 0;
+  // Split at local midnight when it falls within the unaccounted interval.
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  struct tm local;
+  localtime_r(&tv.tv_sec, &local);
+  unsigned long sinceMidnightMs = (unsigned long)(local.tm_hour * 3600UL + local.tm_min * 60UL + local.tm_sec) * 1000UL + tv.tv_usec / 1000UL;
+  unsigned long boundaryMs = nowMs;
+  String boundaryIso = isoNow();
+  if (sinceMidnightMs <= nowMs - lastAccountMs) {
+    boundaryMs = nowMs - sinceMidnightMs;
+    boundaryIso = d + "T00:00:00";
   }
+  accountElapsedUntil(boundaryMs);
+  String oldDay = currentDay;
+  String oldStart = stateStartIso;
+  String oldReason = stateReason;
+  String oldStatus = currentAttend == AS_PRESENT ? "PRESENT" : "ABSENT";
+  unsigned long oldDuration = (boundaryMs - stateStartMs) / 1000UL;
+  String summary = "{\"present_sec\":" + String(todayPresentSec) + ",\"absent_sec\":" + String(todayAbsentSec) + "}";
+
+  // Change the accounting state before any blocking network operations.
+  currentDay = d;
+  todayPresentSec = todayAbsentSec = 0;
+  presentRemainderMs = absentRemainderMs = 0;
+  stateStartMs = lastAccountMs = boundaryMs;
+  stateStartIso = boundaryIso;
+  pushSession(oldDay, oldStatus, oldStart, boundaryIso, oldDuration, oldReason);
+  firebasePATCH(String("/attendance/") + STUDENT_NAME + "/" + oldDay + "/summary", summary);
 }
 
 void pushSession(const String& day, const String& statusText, const String& startIso, const String& endIso, unsigned long durSec, const String& reason) {
@@ -319,51 +366,38 @@ String absentReason() {
   if (gpsStatus != "INSIDE") return "OUTSIDE_GEOFENCE";
   if (lastStatus == ST_DISCONNECTED) return "ELECTRODES_NOT_CONNECTED";
   if (lastStatus == ST_UNAUTHORIZED) return "UNAUTHORIZED_ECG";
-  return "UNKNOWN";
+  return "ECG_NOT_READY";
 }
 
 void updateAttendance() {
   startNewDayIfNeeded();
-
-  bool p = isPresentNow();
-  AttendState newState = p ? AS_PRESENT : AS_ABSENT;
-
-  if (newState == currentAttend) return; // no change
-
-  // close previous segment and push to Firebase
+  if (!attendanceStarted) return;
   unsigned long nowMs = millis();
-  unsigned long durSec = (nowMs - stateStartMs) / 1000;
-  if (durSec < 1) durSec = 1;
+  accountElapsedUntil(nowMs);
+  AttendState newState = isPresentNow() ? AS_PRESENT : AS_ABSENT;
+  String newReason = newState == AS_PRESENT ? "OK" : absentReason();
+  if (newState == currentAttend && newReason == stateReason) return;
 
   String endIso = isoNow();
-  static String lastStateStartIso = "1970-01-01T00:00:00";
-  if (lastStateStartIso == "1970-01-01T00:00:00") lastStateStartIso = isoNow();
-
-  String prevStatusText = (currentAttend == AS_PRESENT) ? "PRESENT" : "ABSENT";
-  String reason = (currentAttend == AS_PRESENT) ? "OK" : absentReason();
-
-  pushSession(currentDay, prevStatusText, lastStateStartIso, endIso, durSec, reason);
-
-  // add to totals
-  if (currentAttend == AS_PRESENT) todayPresentSec += durSec;
-  else todayAbsentSec += durSec;
-
-  // update summary quickly
-  String base = String("/attendance/") + STUDENT_NAME + "/" + currentDay;
-  String summary = "{";
-  summary += "\"present_sec\":" + String(todayPresentSec) + ",";
-  summary += "\"absent_sec\":"  + String(todayAbsentSec);
-  summary += "}";
-  firebasePATCH(base + "/summary", summary);
-
-  // switch state
+  if (endIso.length() == 0) return;
+  String oldStatus = currentAttend == AS_PRESENT ? "PRESENT" : "ABSENT";
+  String oldStart = stateStartIso;
+  String oldReason = stateReason;
+  unsigned long duration = (nowMs - stateStartMs) / 1000UL;
   currentAttend = newState;
+  stateReason = newReason;
   stateStartMs = nowMs;
-  lastStateStartIso = isoNow();
+  stateStartIso = endIso;
+
+  // Totals were already accounted above. Closing a session never adds time twice.
+  pushSession(currentDay, oldStatus, oldStart, endIso, duration, oldReason);
+  String summary = "{\"present_sec\":" + String(todayPresentSec) + ",\"absent_sec\":" + String(todayAbsentSec) + "}";
+  firebasePATCH(String("/attendance/") + STUDENT_NAME + "/" + currentDay + "/summary", summary);
 }
 
-// Replaced firebaseHeartbeat internals with Code 2 technique (PUT current + summary)
+// Publish the current state and summary at the configured heartbeat interval.
 void firebaseHeartbeat() {
+  if (!attendanceStarted || WiFi.status() != WL_CONNECTED) return;
   // write current status periodically so Firebase always shows live state
   if (millis() - lastFirebaseHeartbeatMs < FIREBASE_HEARTBEAT_MS) return;
   lastFirebaseHeartbeatMs = millis();
@@ -392,60 +426,11 @@ void firebaseHeartbeat() {
   firebasePUT(sumBase, sum);
 }
 
-// ================== ATTENDANCE INTERVAL (NEW) ==================
-// Called periodically (every ATTEND_INTERVAL_MS). This replaces per-second writes.
-// It:
-//  - ensures day rollover
-//  - calls updateAttendance() to handle state transitions
-//  - adds ATTEND_INTERVAL_MS/1000 seconds to present or absent totals
-//  - writes current + summary to Firebase (PUT)
+// ================== ATTENDANCE TICK ==================
 void attendanceEveryInterval() {
-  unsigned long now = millis();
-  if (lastAttendIntervalMs == 0) lastAttendIntervalMs = now;
-  if (now - lastAttendIntervalMs < ATTEND_INTERVAL_MS) return;
-
-  // Advance the interval marker (handle missed intervals)
-  unsigned long intervals = (now - lastAttendIntervalMs) / ATTEND_INTERVAL_MS;
-  lastAttendIntervalMs += intervals * ATTEND_INTERVAL_MS;
-  unsigned long addSeconds = (ATTEND_INTERVAL_MS / 1000UL) * intervals;
-  if (addSeconds == 0) addSeconds = 1; // safety
-
-  // Ensure new day handling
-  startNewDayIfNeeded();
-
-  // Ensure state transition handling is processed before adding interval seconds.
+  // Update counters from elapsed time; heartbeat owns the periodic writes.
   updateAttendance();
-
-  // Add to totals based on currentAttend
-  if (currentAttend == AS_PRESENT) todayPresentSec += addSeconds;
-  else todayAbsentSec += addSeconds;
-
-  // Write current + summary to Firebase (PUT)
-  if (WiFi.status() == WL_CONNECTED) {
-    String curPath = String("/attendance/") + STUDENT_NAME + "/current";
-    String cur = "{";
-    cur += "\"day\":\"" + currentDay + "\",";
-    cur += "\"status\":\"" + String(currentAttend == AS_PRESENT ? "PRESENT" : "ABSENT") + "\",";
-    cur += "\"present_sec\":" + String(todayPresentSec) + ",";
-    cur += "\"absent_sec\":" + String(todayAbsentSec) + ",";
-    cur += "\"gps_valid\":" + String(gpsValid ? "true" : "false") + ",";
-    cur += "\"gps_status\":\"" + gpsStatus + "\",";
-    cur += "\"lat\":" + String(lastLat, 6) + ",";
-    cur += "\"lng\":" + String(lastLng, 6) + ",";
-    cur += "\"ecg_status\":\"" + String(ecgStatusStr(lastStatus)) + "\",";
-    cur += "\"score\":" + String(lastScore, 3) + ",";
-    cur += "\"updated\":\"" + isoNow() + "\"";
-    cur += "}";
-    firebasePUT(curPath, cur);
-
-    // summary today (PUT)
-    String sumPath = String("/attendance/") + STUDENT_NAME + "/" + currentDay + "/summary";
-    String sum = "{";
-    sum += "\"present_sec\":" + String(todayPresentSec) + ",";
-    sum += "\"absent_sec\":" + String(todayAbsentSec);
-    sum += "}";
-    firebasePUT(sumPath, sum);
-  }
+  firebaseHeartbeat();
 }
 
 // ================== WEB UI PAGE (MAP + STATUS) ==================
@@ -508,7 +493,7 @@ const homeLng = %HOME_LNG%;
 const radiusM = %RADIUS%;
 
 var map = L.map('map').setView([homeLat, homeLng], 18);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20}).addTo(map);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(map);
 
 L.marker([homeLat, homeLng]).addTo(map).bindPopup('Geofence Center');
 L.circle([homeLat, homeLng], {radius: radiusM, color:'#0055ff', fillColor:'#0055ff', fillOpacity:0.15}).addTo(map);
@@ -557,6 +542,9 @@ async function refresh(){
     document.getElementById('asec').textContent = d.att.absent_sec;
 
   }catch(e){
+    setPill(document.getElementById('gpsPill'), "NO CONNECTION", "nofix");
+    setPill(document.getElementById('ecgPill'), "NO CONNECTION", "nofix");
+    setPill(document.getElementById('attPill'), "UNKNOWN", "nofix");
     console.log(e);
   }
 }
@@ -576,11 +564,27 @@ String buildPage() {
   return p;
 }
 
+bool requireDashboardLogin() {
+  if (String(DASHBOARD_USERNAME).length() == 0 ||
+      String(DASHBOARD_PASSWORD).length() < 12 ||
+      String(DASHBOARD_PASSWORD) == "INSERT_A_PRIVATE_PASSWORD_12_PLUS_CHARS") {
+    server.send(503, "text/plain", "Configure a private dashboard username and password first.");
+    return false;
+  }
+  if (!server.authenticate(DASHBOARD_USERNAME, DASHBOARD_PASSWORD)) {
+    server.requestAuthentication();
+    return false;
+  }
+  return true;
+}
+
 void handleRoot() {
+  if (!requireDashboardLogin()) return;
   server.send(200, "text/html", buildPage());
 }
 
 void handleData() {
+  if (!requireDashboardLogin()) return;
   String json = "{";
 
   json += "\"gps\":{";
@@ -605,6 +609,18 @@ void handleData() {
 
   json += "}";
   server.send(200, "application/json", json);
+}
+
+// A verification expires if no fresh result is produced.
+const unsigned long ECG_MAX_RESULT_AGE_MS = WINDOW_MS + 2000UL;
+bool electrodesWereConnected = false;
+
+void invalidateECG(StatusState state) {
+  lastStatus = state;
+  lastWindowMs = 0;
+  lastScore = 999.0f;
+  baseline = 2000.0f;
+  resetWindow();
 }
 
 // ================== SETUP ==================
@@ -642,27 +658,25 @@ void setup() {
   server.begin();
 
   // init attendance day
-  currentDay = dayNow();
+  currentDay = "";
   stateStartMs = millis();
   currentAttend = AS_ABSENT;
-
-  // Load today's totals from Firebase (new technique)
-  if (WiFi.status() == WL_CONNECTED) {
-    loadTodayTotalsFromFirebase();
-  }
+  attendanceStarted = false; // First valid clock reading initializes/restores totals.
 
   // initial Firebase current node
   firebaseHeartbeat();
 
-  // initialize interval ticker
-  lastAttendIntervalMs = millis();
+
 }
 
 // ================== LOOP ==================
 void loop() {
+  if (lastWindowMs != 0 && millis() - lastWindowMs > ECG_MAX_RESULT_AGE_MS) {
+    invalidateECG(ST_NONE);
+  }
   server.handleClient();
 
-  // Run attendance check & write at configured interval (15s)
+  // Account elapsed time; database heartbeats are throttled to 15 seconds.
   attendanceEveryInterval();
 
   // ------------------ GPS PARSE ------------------
@@ -674,9 +688,10 @@ void loop() {
     lastLat = gps.location.lat();
     lastLng = gps.location.lng();
     lastFixMs = millis();
+    haveGpsFix = true;
   }
 
-  gpsValid = (millis() - lastFixMs) < GPS_HOLD_MS;
+  gpsValid = haveGpsFix && (millis() - lastFixMs) < GPS_HOLD_MS;
 
   if (gpsValid) {
     double d = distanceMeters(lastLat, lastLng, homeLat, homeLng);
@@ -695,14 +710,20 @@ void loop() {
   lastSample = millis();
 
   if (!electrodesConnected()) {
-    lastStatus = ST_DISCONNECTED;
+    electrodesWereConnected = false;
+    invalidateECG(ST_DISCONNECTED);
     updateAttendance();
     firebaseHeartbeat();
     return;
   }
+  if (!electrodesWereConnected) {
+    electrodesWereConnected = true;
+    invalidateECG(ST_NONE);
+  }
 
   int ecg = analogRead(ECG_PIN);
   if (!validSample(ecg)) {
+    invalidateECG(ST_NONE);
     updateAttendance();
     firebaseHeartbeat();
     return;
@@ -722,6 +743,7 @@ void loop() {
         float rr = (float)(now - lastPeakTime);
         rrSum += rr;
         rrSqSum += rr * rr;
+        rrCount++;
 
         beatCount++;
         peakSum += (float)prev1;
@@ -746,15 +768,15 @@ void loop() {
 
   if (now - windowStart >= WINDOW_MS) {
     if (sampleCount < 50) {
-      resetWindow();
+      invalidateECG(ST_NONE);
       updateAttendance();
       firebaseHeartbeat();
       return;
     }
 
     float meanRR = -1, stdRR = -1;
-    if (beatCount >= 3) {
-      float rrN = (float)(beatCount - 1);
+    if (rrCount >= 2) {
+      float rrN = (float)rrCount;
       meanRR = rrSum / rrN;
       float varRR = (rrSqSum / rrN) - (meanRR * meanRR);
       if (varRR < 0) varRR = 0;

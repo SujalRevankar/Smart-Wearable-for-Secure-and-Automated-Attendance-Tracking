@@ -23,3 +23,7 @@ const float SD_mean_peak = 1.0f; // PLACEHOLDER
 const float SD_std_peak = 1.0f; // PLACEHOLDER
 const float SD_energy = 1.0f; // PLACEHOLDER
 float AUTH_THRESHOLD = 0.0f; // PLACEHOLDER: choose and validate with your enrollment data.
+
+// LAN dashboard access only. HTTP Basic does not encrypt network traffic.
+#define DASHBOARD_USERNAME "INSERT_YOUR_USERNAME"
+#define DASHBOARD_PASSWORD "INSERT_A_PRIVATE_PASSWORD_12_PLUS_CHARS"

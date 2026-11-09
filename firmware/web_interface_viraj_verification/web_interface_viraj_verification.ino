@@ -1,4 +1,5 @@
 // Public source: configure locally using config.example.h; see docs/CONFIGURATION.md.
+#include <Arduino.h>
 #include "config.local.h"
 
 #include <WiFi.h>
@@ -34,6 +35,7 @@ unsigned long windowStart = 0;
 unsigned long lastPeakTime = 0;
 
 int beatCount = 0;
+unsigned int rrCount = 0;
 float rrSum = 0, rrSqSum = 0;
 float peakSum = 0, peakSqSum = 0;
 float energySum = 0;
@@ -78,6 +80,10 @@ static inline bool validSample(int ecg) {
 
 void resetWindow() {
   beatCount = 0;
+  rrCount = 0;
+  lastPeakTime = 0;
+  prev1 = prev2 = 0;
+  armed = true;
   rrSum = rrSqSum = 0;
   peakSum = peakSqSum = 0;
   energySum = 0;
@@ -151,6 +157,9 @@ async function refresh(){
     document.getElementById('sp').textContent = j.std_peak;
     document.getElementById('en').textContent = j.energy;
   } catch(e){
+    const st = document.getElementById('status');
+    st.textContent = 'NO CONNECTION';
+    st.className = 'big warn';
     console.log(e);
   }
 }
@@ -164,11 +173,27 @@ refresh();
 }
 
 // ================== WEB: ROUTES ==================
+bool requireDashboardLogin() {
+  if (String(DASHBOARD_USERNAME).length() == 0 ||
+      String(DASHBOARD_PASSWORD).length() < 12 ||
+      String(DASHBOARD_PASSWORD) == "INSERT_A_PRIVATE_PASSWORD_12_PLUS_CHARS") {
+    server.send(503, "text/plain", "Configure a private dashboard username and password first.");
+    return false;
+  }
+  if (!server.authenticate(DASHBOARD_USERNAME, DASHBOARD_PASSWORD)) {
+    server.requestAuthentication();
+    return false;
+  }
+  return true;
+}
+
 void handleRoot() {
+  if (!requireDashboardLogin()) return;
   server.send(200, "text/html", htmlPage());
 }
 
 void handleStatus() {
+  if (!requireDashboardLogin()) return;
   String json = "{";
   json += "\"status\":\"" + String(statusToStr(lastStatus)) + "\",";
   json += "\"t_ms\":" + String(lastWindowMs) + ",";
@@ -182,6 +207,18 @@ void handleStatus() {
   json += "\"energy\":" + String(lastEnergy, 1);
   json += "}";
   server.send(200, "application/json", json);
+}
+
+// A verification expires if no fresh result is produced.
+const unsigned long ECG_MAX_RESULT_AGE_MS = WINDOW_MS + 2000UL;
+bool electrodesWereConnected = false;
+
+void invalidateECG(StatusState state) {
+  lastStatus = state;
+  lastWindowMs = 0;
+  lastScore = 999.0f;
+  baseline = 2000.0f;
+  resetWindow();
 }
 
 // ================== SETUP ==================
@@ -217,6 +254,9 @@ void setup() {
 
 // ================== LOOP ==================
 void loop() {
+  if (lastWindowMs != 0 && millis() - lastWindowMs > ECG_MAX_RESULT_AGE_MS) {
+    invalidateECG(ST_NONE);
+  }
   server.handleClient();  // ✅ keeps web server alive
 
   // sample timing
@@ -225,12 +265,17 @@ void loop() {
 
   // electrodes disconnected => status only
   if (!electrodesConnected()) {
-    setStatus(ST_DISCONNECTED);
+    electrodesWereConnected = false;
+    invalidateECG(ST_DISCONNECTED);
     return;
+  }
+  if (!electrodesWereConnected) {
+    electrodesWereConnected = true;
+    invalidateECG(ST_NONE);
   }
 
   int ecg = analogRead(ECG_PIN);
-  if (!validSample(ecg)) return;
+  if (!validSample(ecg)) { invalidateECG(ST_NONE); return; }
 
   baseline = (1.0f - BASELINE_ALPHA) * baseline + BASELINE_ALPHA * (float)ecg;
   float dynThresh = baseline + THRESH_MARGIN;
@@ -247,6 +292,7 @@ void loop() {
         float rr = (float)(now - lastPeakTime);
         rrSum += rr;
         rrSqSum += rr * rr;
+        rrCount++;
 
         beatCount++;
         peakSum += (float)prev1;
@@ -271,11 +317,11 @@ void loop() {
 
   // End of window => compute & verify
   if (now - windowStart >= WINDOW_MS) {
-    if (sampleCount < 50) { resetWindow(); return; }
+    if (sampleCount < 50) { invalidateECG(ST_NONE); return; }
 
     float meanRR = -1, stdRR = -1;
-    if (beatCount >= 3) {
-      float rrN = (float)(beatCount - 1);
+    if (rrCount >= 2) {
+      float rrN = (float)rrCount;
       meanRR = rrSum / rrN;
       float varRR = (rrSqSum / rrN) - (meanRR * meanRR);
       if (varRR < 0) varRR = 0;

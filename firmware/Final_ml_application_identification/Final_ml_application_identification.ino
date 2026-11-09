@@ -1,4 +1,5 @@
 // Public source: configure locally using config.example.h; see docs/CONFIGURATION.md.
+#include <Arduino.h>
 #include "config.local.h"
 
 #include <math.h>
@@ -24,9 +25,11 @@
 // ================== STATE ==================
 unsigned long lastSample = 0;
 unsigned long windowStart = 0;
+unsigned long lastWindowMs = 0;
 unsigned long lastPeakTime = 0;
 
 int beatCount = 0;
+unsigned int rrCount = 0;
 float rrSum = 0, rrSqSum = 0;
 float peakSum = 0, peakSqSum = 0;
 float energySum = 0;
@@ -50,6 +53,8 @@ void printStatusOnce(StatusState s) {
     Serial.println("✅ VIRAJ IS WEARING THE WATCH");
   } else if (s == ST_UNAUTHORIZED) {
     Serial.println("🚨 UNAUTHORIZED PERSON WEARING THE WATCH");
+  } else {
+    Serial.println("Collecting a fresh ECG window");
   }
 }
 
@@ -64,6 +69,10 @@ static inline bool validSample(int ecg) {
 
 void resetWindow() {
   beatCount = 0;
+  rrCount = 0;
+  lastPeakTime = 0;
+  prev1 = prev2 = 0;
+  armed = true;
   rrSum = rrSqSum = 0;
   peakSum = peakSqSum = 0;
   energySum = 0;
@@ -75,6 +84,18 @@ static inline float z2(float x, float mu, float sd) {
   if (sd < 1e-6f) sd = 1e-6f;
   float z = (x - mu) / sd;
   return z * z;
+}
+
+// A verification expires if no fresh result is produced.
+const unsigned long ECG_MAX_RESULT_AGE_MS = WINDOW_MS + 2000UL;
+bool electrodesWereConnected = false;
+
+void invalidateECG(StatusState state) {
+  printStatusOnce(state);
+  lastWindowMs = 0;
+  
+  baseline = 2000.0f;
+  resetWindow();
 }
 
 // ================== SETUP ==================
@@ -95,18 +116,26 @@ void setup() {
 
 // ================== LOOP ==================
 void loop() {
+  if (lastWindowMs != 0 && millis() - lastWindowMs > ECG_MAX_RESULT_AGE_MS) {
+    invalidateECG(ST_NONE);
+  }
   // sample timing
   if (millis() - lastSample < SAMPLE_INTERVAL_MS) return;
   lastSample = millis();
 
   // If electrodes disconnected -> print once and do nothing else
   if (!electrodesConnected()) {
-    printStatusOnce(ST_DISCONNECTED);
+    electrodesWereConnected = false;
+    invalidateECG(ST_DISCONNECTED);
     return;
+  }
+  if (!electrodesWereConnected) {
+    electrodesWereConnected = true;
+    invalidateECG(ST_NONE);
   }
 
   int ecg = analogRead(ECG_PIN);
-  if (!validSample(ecg)) return;
+  if (!validSample(ecg)) { invalidateECG(ST_NONE); return; }
 
   // update baseline and dynamic threshold
   baseline = (1.0f - BASELINE_ALPHA) * baseline + BASELINE_ALPHA * (float)ecg;
@@ -125,6 +154,7 @@ void loop() {
         float rr = (float)(now - lastPeakTime);
         rrSum += rr;
         rrSqSum += rr * rr;
+        rrCount++;
 
         beatCount++;
         peakSum += (float)prev1;
@@ -151,14 +181,14 @@ void loop() {
   if (now - windowStart >= WINDOW_MS) {
 
     if (sampleCount < 50) {
-      // not enough data, don't spam status; just reset
-      resetWindow();
+      // Not enough data: do not retain a previous authorization.
+      invalidateECG(ST_NONE);
       return;
     }
 
     float meanRR = -1, stdRR = -1;
-    if (beatCount >= 3) {
-      float rrN = (float)(beatCount - 1);
+    if (rrCount >= 2) {
+      float rrN = (float)rrCount;
       meanRR = rrSum / rrN;
 
       float varRR = (rrSqSum / rrN) - (meanRR * meanRR);
@@ -191,6 +221,8 @@ void loop() {
 
       authorized = (score <= AUTH_THRESHOLD);
     }
+
+    lastWindowMs = now;
 
     // ✅ Print only if status changed
     if (authorized) printStatusOnce(ST_AUTHORIZED);

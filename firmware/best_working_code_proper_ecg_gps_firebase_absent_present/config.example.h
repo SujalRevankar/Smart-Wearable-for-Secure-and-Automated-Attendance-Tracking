@@ -29,3 +29,14 @@ const float SD_mean_peak = 1.0f; // PLACEHOLDER
 const float SD_std_peak = 1.0f; // PLACEHOLDER
 const float SD_energy = 1.0f; // PLACEHOLDER
 float AUTH_THRESHOLD = 0.0f; // PLACEHOLDER: choose and validate with your enrollment data.
+
+// LAN dashboard access only. HTTP Basic does not encrypt network traffic.
+#define DASHBOARD_USERNAME "INSERT_YOUR_USERNAME"
+#define DASHBOARD_PASSWORD "INSERT_A_PRIVATE_PASSWORD_12_PLUS_CHARS"
+
+// Obtain an ID token for your own Firebase user; it is short lived.
+// This prototype does not automatically refresh tokens. Never commit a live token.
+#define FIREBASE_ID_TOKEN "INSERT_CURRENT_FIREBASE_ID_TOKEN"
+// Use the trusted root CA for your own database endpoint, in PEM format.
+// Do not use setInsecure() or guess/paste a certificate from an untrusted source.
+static const char FIREBASE_ROOT_CA[] = R"PEM(INSERT_TRUSTED_ROOT_CA_PEM_HERE)PEM";

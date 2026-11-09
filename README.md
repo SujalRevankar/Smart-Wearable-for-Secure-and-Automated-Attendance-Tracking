@@ -163,6 +163,8 @@ The two-board arrangement describes this prototype. The supplied main-board sket
 | Dashboard | HTML, CSS, JavaScript, Leaflet, OpenStreetMap |
 | Time | NTP with an India UTC+05:30 offset |
 
+The firmware in this repository includes later code corrections and is not a byte-for-byte archive of the original hardware demonstration. See [code update notes](docs/CODE_UPDATE_GUIDE.md).
+
 ## Source Files
 
 The repository contains the following firmware and training files. Credentials, geofence coordinates, and enrolled ECG values are provided locally through ignored configuration files.
@@ -205,9 +207,9 @@ These sketches are alternative programs. **Open and upload one sketch at a time*
 1. Open the combined sketch in its own Arduino sketch folder.
 2. Copy `config.example.h` to `config.local.h` inside your chosen sketch folder. Fill in your private settings and ECG enrollment values, then set `PROJECT_CONFIGURED` to `1`. Keep `config.local.h` private. See [configuration instructions](docs/CONFIGURATION.md).
 3. Keep `RADIUS` at `50.0` for the documented circular geofence.
-4. Complete Firebase authentication, restricted database rules, and TLS certificate validation before live use. The uploaded prototype requires changes for these protections; see the limitations below.
+4. In your private configuration, supply a current Firebase ID token, the trusted root CA for your database endpoint, and dashboard login credentials. Configure restrictive Firebase rules for that user. The token is short lived and this prototype does not refresh it automatically. See [configuration instructions](docs/CONFIGURATION.md).
 5. Connect the modules using the signal table, select the correct ESP32 board and port, then compile and upload.
-6. Open Serial Monitor at 115200 baud and use the `Open Web: http://...` address printed by the ESP32.
+6. Open Serial Monitor at 115200 baud and use the `Open Web: http://...` address printed by the ESP32. Sign in with your private dashboard credentials. The dashboard uses HTTP Basic on a local network, not encrypted HTTPS.
 7. Open that address from a device on the same network. Internet access is also needed for Firebase, NTP, and the dashboard's external map assets.
 
 ## Usage
@@ -230,16 +232,16 @@ The combined sketch writes attendance records; it does not implement a raw ECG e
 
 ## Current Limitations
 
-- **Database security:** the supplied firmware sends Firebase requests without authentication and uses `setInsecure()`, which disables server-certificate verification. Removing credentials from the repository does not fix these runtime issues.
-- **Dashboard access:** the firmware serves HTTP dashboard and status endpoints without authentication. Clients able to reach the ESP32 can read the exposed data.
-- **Duration and session accounting:** periodic updates and state changes both add elapsed seconds. A test of the extracted functions counted 60 absent seconds as 120 on a transition. The first session can also have equal start/end timestamps despite a nonzero duration. These implementations need correction before the records are used as reliable attendance measurements.
+- **Firebase configuration:** the revised sketch requires a private Firebase ID token and trusted root CA. No public-database or `setInsecure()` fallback is used. Token renewal is manual; live Firebase access, certificate selection and rules have not been tested here.
+- **Dashboard transport:** dashboard and JSON endpoints require login, but HTTP Basic credentials are not encrypted by this HTTP server. Use a trusted local network and do not expose it directly to the internet.
+- **Attendance validation:** the revised code accounts elapsed time once, retains subsecond remainders and initializes session timestamps at state entry. Desktop tests cover state changes and midnight splitting; physical timing, restart recovery and database behavior still need hardware validation.
 - **Sampling timing:** the intended ECG sampling interval is 4 ms, approximately 250 Hz. Blocking web/database calls can interrupt sampling, so this is a target rate rather than a verified sustained rate.
-- **Signal freshness:** GPS validity checks elapsed time without explicitly requiring a received fix. Invalid ECG samples do not expire an earlier authorization, and reconnect handling does not explicitly clear the analysis window. These behaviors need code changes.
-- **ECG feature calculation:** peak history survives window resets while RR sums and beat counts reset. The subsequent RR mean divides by `beatCount - 1`, which can be the wrong interval count. This affects all three sketches and needs correction.
-- **Enrollment input checks:** the notebook does not reject insufficient data before calculating the template. One retained row produces invalid statistics; zero retained rows causes a calculation error.
+- **Signal freshness:** the revised code requires an acquired GPS fix, invalidates unusable ECG samples, clears peak history on reconnection and expires old verification results. The timing and behavior under real sensor noise still need hardware validation.
+- **ECG enrollment compatibility:** the revised sketches count RR intervals explicitly and reset peak history at window boundaries. Recollect/recompute enrollment features using the corrected extraction before calibrating a profile; previously fitted values must not be assumed compatible.
+- **Enrollment evidence:** the notebook now rejects fewer than two valid rows, nonfinite parameters and nonpositive/nonfinite suggested thresholds. Passing these computational checks does not establish a sufficient biometric dataset or authentication accuracy.
 - **Identity assurance:** this enrollment-distance approach needs testing across different wearers, days, movement, and electrode placement. Replay resistance and robust identity assurance have not been demonstrated.
 - **GPS uncertainty:** location error can affect decisions near the 50 m boundary.
-- **Connectivity and clock:** persistent offline queuing and retry handling are not implemented; time-dependent records rely on successful NTP synchronization.
+- **Connectivity and clock:** there is no persistent offline queue or automatic token refresh. Time-dependent recording starts after a valid clock reading. Failed writes and restarts can lose records; a failed initial summary read still falls back to zero. Do not treat database persistence/restart recovery as validated.
 
 ## Contributing
 

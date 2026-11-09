@@ -1,28 +1,16 @@
-# Publication review — 9 November 2026
+# Revised code validation — 9 November 2026
 
-Scope: the 15-file GitHub ZIP supplied for review on 9 November 2026. This review does not cover Git history, actual Firebase rules or hardware execution.
+These checks apply to the replacement code supplied after the original repository audit. This is a software revision, not a claim about the historical demonstration.
 
-## Credential review
+- All three revised sketches passed desktop C++ syntax checks using mocked Arduino libraries. This is not compilation with the ESP32 Arduino toolchain.
+- Tests of the revised functions preserved 60 absent seconds as 60 through a transition, recorded distinct first-session timestamps, retained the original absence reason and preserved subsecond time through rapid transitions.
+- A two-second simulated absence across midnight split into one second per calendar day.
+- Each sketch's revised detector calculated a 1000-ms RR mean with zero deviation for evenly spaced synthetic peaks.
+- Simulated invalid samples, disconnection/reconnection and stale results invalidated an earlier authorization. GPS startup requires an explicit received fix.
+- The notebook accepted varied valid synthetic input and rejected a single row, fully filtered input and identical rows before printing a usable profile.
+- Placeholder Firebase security settings and dashboard passwords were rejected. Mocked authenticated request construction invoked CA setup. No actual TLS handshake or Firebase login was tested.
+- Gitleaks found zero secrets in the revised package. No real credentials, biometric template values or private data were added.
 
-Gitleaks 8.30.1 returned zero findings for the extracted snapshot. The official release archive was checked against its published SHA-256 checksum. Targeted checks against 46 private configuration entries from the original uploads also found no original-value matches.
+Not performed: ESP32 Arduino build, firmware upload, hardware test, real database access, Firebase rules review, real certificate validation, multi-person accuracy evaluation or Git history audit.
 
-No original Wi-Fi settings, Firebase hostname, geofence coordinates, ECG template values, API tokens, private keys, service-account files, local configuration headers, private CSVs or database exports were found. Notebook outputs and execution counts are cleared. Configuration examples contain placeholders and deliberately block compilation until configured locally.
-
-The GIF and wiring PNG match the prepared demonstration assets. They contain illustrative/reference material rather than the user's original video or location screenshot. Public CDN, map, NTP and badge URLs are not private credentials.
-
-## Code checks
-
-Notebook JSON and Python syntax checks passed. Running the actual enrollment cell on synthetic data produced finite values with four varied valid rows, invalid statistics with one valid row, and a calculation error when all rows were filtered out.
-
-A desktop C++ harness exercised extracted attendance functions and the ECG peak-detection block using simulated time and mocked hardware/network calls. It reproduced duration double-counting, inconsistent first-session timestamps, and an incorrect RR mean across analysis windows. These checks are not a full Arduino build or hardware test.
-
-## Unresolved implementation issues
-
-- Firebase requests have no implemented authentication, and TLS certificate validation is disabled.
-- Dashboard HTTP endpoints have no authentication.
-- Duration/session accounting, GPS startup validity, RR interval counting, ECG freshness and inadequate enrollment-data handling need correction.
-- Synchronous networking can interrupt sampling; no sustained 250-Hz rate has been measured here.
-- The second ESP32's GPS sketch is absent, and its exact UART GPIOs/final power connection remain unverified.
-- The wiring image refers to third-party artwork sources. Its attribution notices must be retained; a missing SOURCES.md can be replaced by equivalent notices in the README.
-
-No repository source was changed by the review. No Firebase connection or physical hardware test was performed. A clean snapshot scan does not establish that earlier commits or the live database are free of exposure.
+Remaining limitations: synchronous networking can interrupt sampling; token renewal is manual; HTTP Basic dashboard traffic is not encrypted; offline records are not durably queued; failed initial summary reads fall back to zero; second-board firmware and exact pin assignments remain unavailable. These limitations are not fixed by the software tests above.
