@@ -37,7 +37,6 @@ An ESP32-based prototype that combines an enrolled ECG profile with a 50-metre G
 - [Usage](#usage)
 - [Firebase Records](#firebase-records)
 - [Current Limitations](#current-limitations)
-- [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [License](#license)
 - [Contact and Acknowledgments](#contact-and-acknowledgments)
@@ -48,7 +47,7 @@ An ESP32-based prototype that combines an enrolled ECG profile with a 50-metre G
 
 Manual attendance takes time, while a location-only check does not establish who is carrying a device. This project explores combining two signals: whether the connected wearer matches an enrolled ECG profile, and whether the device is within an allowed area.
 
-The prototype uses an AD8232 ECG sensor and a GPS module. The main ESP32 processes both signals, hosts a browser dashboard, and writes attendance information to Firebase Realtime Database. A second ESP32 supplies power to the GPS module in the physical prototype; GPS data reaches the main ESP32 through UART TX/RX.
+The prototype uses two ESP32 boards, an AD8232 ECG sensor, and a NEO-6M GPS module. The main ESP32 runs the supplied combined ECG/GPS attendance sketch, serves the dashboard, and sends attendance records to Firebase. The second ESP32 powered the GPS module and had GPS firmware installed. The GPS serial lines were shared through a breadboard, as described by the project author. The second-board sketch is not included, so its exact UART GPIO assignments and final power wiring cannot be verified from this repository.
 
 The documented geofence is a **circle with a 50-metre radius around a configurable centre**. It is not a campus boundary polygon.
 
@@ -67,7 +66,7 @@ The documented geofence is a **circle with a 50-metre radius around a configurab
 
 ```mermaid
 flowchart TD
-    P["Second ESP32: GPS power"] -.-> G["GPS module"]
+    P["Second ESP32: GPS firmware and power"] -.-> G["GPS module"]
     G -->|"UART TX/RX"| M["Main ESP32"]
     E["AD8232: ECG and lead-off signals"] --> M
     T["Enrolled ECG template"] --> M
@@ -116,7 +115,7 @@ $$
 
 A valid feature window is classified as authorized when its distance is at or below the configured threshold. The notebook suggests a threshold from the enrollment distances using their mean plus three standard deviations.
 
-This is a **single-person statistical template model**. The uploaded notebook does not train a neural network, random forest, or multi-person classifier. The standalone ECG sketches use the same distance-based approach, with slightly different peak-detection settings from the combined sketch; enrollment and verification should use matching extraction settings.
+This is a **single-person statistical template model**. The uploaded notebook does not train a neural network, random forest, or multi-person classifier. All three supplied sketches use the same configured sampling interval, analysis-window length, refractory period, baseline coefficient, and peak-threshold margin. Enrollment and verification should use matching feature-extraction settings.
 
 A low score means the window resembles the enrollment profile. It is not a probability or a measured authentication accuracy.
 
@@ -125,14 +124,16 @@ A low score means the window resembles the enrollment profile. It is not a proba
 | Component | Role |
 |---|---|
 | Main ESP32 | ECG acquisition, GPS reception, verification, attendance logic, web server, and Firebase requests |
-| Second ESP32 | GPS power supply in the demonstrated prototype |
+| Second ESP32 | Powered the GPS module and ran separate GPS firmware; its sketch is not included |
 | AD8232 and electrodes | ECG acquisition and lead-off detection |
-| UART GPS module | Latitude and longitude measurements |
+| NEO-6M GPS module | Latitude and longitude measurements |
 | Computer or phone | Browser access to the ESP32 dashboard |
 
 ### Connection Diagram
 
 ![Two-ESP32 breadboard connections](./two-esp32-breadboard-wiring.png?raw=true)
+
+*Reference reconstruction, not a verified build guide. The second board's UART GPIO assignments and final GPS power connection are not established by the supplied files. The dashed red connection documents the reported shared TX wiring; two active transmitters must not drive the same GPS RX line.*
 
 
 ### Signal connections in the combined sketch
@@ -148,7 +149,7 @@ A low score means the window resembles the enrollment profile. It is not a proba
 
 GPS UART is configured for **9600 baud**. USB Serial Monitor is configured for **115200 baud**. Confirm the exact module's supply voltage and UART logic levels before wiring; module-specific power pins are not established by the source files.
 
-The second board is the power arrangement used for this prototype. The two-board setup is not presented as a universal ESP32 requirement.
+The two-board arrangement describes this prototype. The supplied main-board sketch reads GPS serial input directly; the missing second-board sketch is needed to document its exact operation. The board images are reference illustrations, not photographs of the prototype.
 
 ## Built With
 
@@ -164,14 +165,14 @@ The second board is the power arrangement used for this prototype. The two-board
 
 ## Source Files
 
-The supplied project files have the following roles. Publish sanitized copies after the credential and biometric-data review.
+The repository contains the following firmware and training files. Credentials, geofence coordinates, and enrolled ECG values are provided locally through ignored configuration files.
 
 | File | Purpose |
 |---|---|
-| `best_working_code_proper_ecg_gps_firebase_absent_present.ino` | Combined attendance firmware; main implementation |
-| `IOT_ML_VIRAJ.ipynb` | CSV cleaning, ECG template fitting, and threshold suggestion |
-| `Final_ml_application_identification.ino` | Standalone ECG verification firmware |
-| `web_interface_viraj_verification.ino` | ECG-only verification dashboard firmware |
+| [best_working_code_proper_ecg_gps_firebase_absent_present.ino](firmware/best_working_code_proper_ecg_gps_firebase_absent_present/best_working_code_proper_ecg_gps_firebase_absent_present.ino) | Combined attendance firmware; main implementation |
+| [IOT_ML_VIRAJ.ipynb](training/IOT_ML_VIRAJ.ipynb) | CSV cleaning, ECG template fitting, and threshold suggestion |
+| [Final_ml_application_identification.ino](firmware/Final_ml_application_identification/Final_ml_application_identification.ino) | Standalone ECG verification firmware |
+| [web_interface_viraj_verification.ino](firmware/web_interface_viraj_verification/web_interface_viraj_verification.ino) | ECG-only verification dashboard firmware |
 
 These sketches are alternative programs. **Open and upload one sketch at a time**, with each sketch in its own Arduino folder of the same name. Combining them in a single sketch folder would introduce duplicate definitions.
 
@@ -215,7 +216,7 @@ Start the hardware, allow the GPS to acquire a fix, and connect the electrodes. 
 
 The dashboard shows GPS validity and geofence status, ECG classification and score, current attendance, and present/absent duration counters. Test inside and outside the circle, with the enrolled wearer, with another wearer, and with electrodes disconnected.
 
-No accuracy percentage, false-accept rate, or false-reject rate is claimed: the supplied files do not contain a held-out evaluation report. The dashboard photo documents a prototype view, not an accuracy benchmark.
+No held-out authentication evaluation is included, so no accuracy percentage, false-accept rate, or false-reject rate is claimed. The GIF is a simulated walkthrough with fictional people; it is not a recording of hardware execution or an accuracy benchmark.
 
 ## Firebase Records
 
@@ -229,10 +230,13 @@ The combined sketch writes attendance records; it does not implement a raw ECG e
 
 ## Current Limitations
 
-- **Database security:** the uploaded prototype sends Firebase requests without authentication and uses `setInsecure()`, which disables server-certificate verification. Removing credentials from a repository does not resolve these runtime issues.
-- **Duration accounting:** state changes and periodic updates both add elapsed seconds, so totals can be counted twice. Counters need correction and hardware validation before they are treated as reliable attendance durations.
+- **Database security:** the supplied firmware sends Firebase requests without authentication and uses `setInsecure()`, which disables server-certificate verification. Removing credentials from the repository does not fix these runtime issues.
+- **Dashboard access:** the firmware serves HTTP dashboard and status endpoints without authentication. Clients able to reach the ESP32 can read the exposed data.
+- **Duration and session accounting:** periodic updates and state changes both add elapsed seconds. A test of the extracted functions counted 60 absent seconds as 120 on a transition. The first session can also have equal start/end timestamps despite a nonzero duration. These implementations need correction before the records are used as reliable attendance measurements.
 - **Sampling timing:** the intended ECG sampling interval is 4 ms, approximately 250 Hz. Blocking web/database calls can interrupt sampling, so this is a target rate rather than a verified sustained rate.
-- **Signal freshness:** reconnect handling, ECG-window resets, and expiry of an earlier authorization need further validation. GPS startup should explicitly require an acquired fix before accepting the location.
+- **Signal freshness:** GPS validity checks elapsed time without explicitly requiring a received fix. Invalid ECG samples do not expire an earlier authorization, and reconnect handling does not explicitly clear the analysis window. These behaviors need code changes.
+- **ECG feature calculation:** peak history survives window resets while RR sums and beat counts reset. The subsequent RR mean divides by `beatCount - 1`, which can be the wrong interval count. This affects all three sketches and needs correction.
+- **Enrollment input checks:** the notebook does not reject insufficient data before calculating the template. One retained row produces invalid statistics; zero retained rows causes a calculation error.
 - **Identity assurance:** this enrollment-distance approach needs testing across different wearers, days, movement, and electrode placement. Replay resistance and robust identity assurance have not been demonstrated.
 - **GPS uncertainty:** location error can affect decisions near the 50 m boundary.
 - **Connectivity and clock:** persistent offline queuing and retry handling are not implemented; time-dependent records rely on successful NTP synchronization.
